@@ -166,9 +166,17 @@ if ! $skip_dotnet; then
   dotnet add "tests/$name.Application.Tests" reference "src/$name.Application"
   dotnet add "tests/$name.Api.IntegrationTests" reference "src/$name.Api"
 
-  step "Adding packages (latest stable versions)"
-  dotnet add "src/$name.Api" package Microsoft.Extensions.ApiDescription.Server
-  dotnet add "tests/$name.Api.IntegrationTests" package Microsoft.AspNetCore.Mvc.Testing
+  step "Adding packages"
+  # ASP.NET Core packages are versioned with the framework. Pin them to the version the
+  # webapi template chose for Microsoft.AspNetCore.OpenApi, which matches the SDK in
+  # global.json; unpinned, NuGet hands out the newest major, which may not support it.
+  aspnet_version=$(sed -n 's/.*Include="Microsoft\.AspNetCore\.OpenApi" Version="\([^"]*\)".*/\1/p' \
+    "src/$name.Api/$name.Api.csproj")
+  [ -n "$aspnet_version" ] || die "could not read the Microsoft.AspNetCore.OpenApi version from src/$name.Api/$name.Api.csproj"
+  echo "ASP.NET Core packages: $aspnet_version"
+  dotnet add "src/$name.Api" package Microsoft.Extensions.ApiDescription.Server --version "$aspnet_version"
+  dotnet add "tests/$name.Api.IntegrationTests" package Microsoft.AspNetCore.Mvc.Testing --version "$aspnet_version"
+  # Latest stable; these target several .NET versions
   if $dapr; then
     dotnet add "src/$name.Infrastructure" package Dapr.Client
     dotnet add "src/$name.Api" package Dapr.AspNetCore
