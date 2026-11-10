@@ -16,7 +16,7 @@ services:
       - redis
 
   api-dapr:
-    image: daprio/daprd:1.17.3
+    image: daprio/daprd:1.18.10
     command:
       - ./daprd
       - --app-id=my-service-api
