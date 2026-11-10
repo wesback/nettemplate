@@ -1,0 +1,4 @@
+self-hosted-runner:
+  # Label of the runner on the Docker host (see deploy.yml and README.md)
+  labels:
+    - docker-host

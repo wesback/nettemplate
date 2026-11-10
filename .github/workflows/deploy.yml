@@ -1,0 +1,87 @@
+name: deploy
+
+# Deploys to a Docker host through a self-hosted runner on that host. The runner only
+# makes outbound connections, so the host needs no inbound SSH from GitHub.
+#
+# Runs after a successful `docker` workflow on main, or manually with an image tag
+# (sha-<full commit sha>) to roll back. Host setup is in README.md.
+#
+# Security: keep repositories that use this private. On a public repository, pull
+# requests from forks could run code on a self-hosted runner.
+
+on:
+  workflow_run:
+    workflows: [docker]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Image tag to deploy (sha-<full commit sha>). Empty deploys the current main.
+        required: false
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # The template repo itself has no images until scripts/init.sh runs.
+    if: >-
+      github.repository != 'wesback/nettemplate' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: [self-hosted, docker-host]
+    environment: production
+    env:
+      APP_NAME: ${{ github.event.repository.name }}
+      APP_DIR: /opt/apps/${{ github.event.repository.name }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      REQUESTED_TAG: ${{ inputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.HEAD_SHA }}
+
+      - name: Resolve image tag
+        run: |
+          tag="${REQUESTED_TAG:-sha-$HEAD_SHA}"
+          if [[ ! $tag =~ ^sha-[0-9a-f]{40}$ ]]; then
+            echo "::error::image_tag must look like sha-<40 hex characters>, got '$tag'"
+            exit 1
+          fi
+          echo "IMAGE_TAG=$tag" >> "$GITHUB_ENV"
+
+      - name: Check host setup
+        run: |
+          if [ ! -f "$APP_DIR/.env" ]; then
+            echo "::error::$APP_DIR/.env is missing. Create it from deploy/.env.example (see README.md)."
+            exit 1
+          fi
+
+      - name: Install compose file and Dapr components
+        run: |
+          install -d -m 755 "$APP_DIR/components"
+          install -m 644 deploy/compose.yml "$APP_DIR/compose.yml"
+          rm -f "$APP_DIR"/components/*.yaml
+          install -m 644 components/prod/*.yaml "$APP_DIR/components/"
+          printf 'APP_NAME=%s\nIMAGE_TAG=%s\n' "$APP_NAME" "$IMAGE_TAG" > "$APP_DIR/deploy.env"
+
+      - name: Pull and start
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          args=(--env-file .env --env-file deploy.env -f compose.yml)
+          if [ -f compose.host.yml ]; then args+=(-f compose.host.yml); fi
+          docker compose "${args[@]}" pull
+          docker compose "${args[@]}" up -d --wait --wait-timeout 180 --remove-orphans
+          docker compose "${args[@]}" ps
+
+      - name: Show logs on failure
+        if: failure()
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          args=(--env-file .env --env-file deploy.env -f compose.yml)
+          if [ -f compose.host.yml ]; then args+=(-f compose.host.yml); fi
+          docker compose "${args[@]}" logs --tail 100 || true
