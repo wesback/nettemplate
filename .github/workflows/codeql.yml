@@ -10,7 +10,13 @@ on:
 jobs:
   analyze:
     # The template repo itself has no projects until scripts/init.sh runs.
-    if: github.repository != 'wesback/nettemplate'
+    # Code scanning on a private repository needs a GitHub Code Security license, so this
+    # runs on public repositories only, unless the CODEQL repository variable says
+    # otherwise: 'true' forces it on (licensed private repo), 'false' turns it off.
+    if: >-
+      github.repository != 'wesback/nettemplate' &&
+      (vars.CODEQL == 'true' ||
+       (vars.CODEQL != 'false' && github.event.repository.visibility == 'public'))
     runs-on: ubuntu-latest
     permissions:
       contents: read

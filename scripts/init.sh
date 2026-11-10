@@ -2,13 +2,19 @@
 # Turns a fresh copy of the template into a working project:
 #   - .NET solution: Domain, Application, Infrastructure, Api + test projects
 #   - Next.js app in web/ with strict TypeScript, Vitest and a standalone build
-#   - Dockerfiles, and the placeholder names in the workflows and compose file
+#   - compose files, Dapr components and AGENTS.md trimmed to the modules you pick
 # Then it builds and tests everything and removes itself.
 #
-# Usage: scripts/init.sh [--skip-dotnet] [--skip-web] <Name>
-#   <Name>  PascalCase, dot-separated: Contoso.Orders -> image names contoso-orders-api/-web
-#   --skip-dotnet / --skip-web  partial run for debugging; the result will not pass CI.
+# Usage: scripts/init.sh [options] <Name>
+#   <Name>             PascalCase, dot-separated: Contoso.Orders -> images contoso-orders-api/-web
+#   --dapr             Dapr sidecar for the API: key-value state and service invocation
+#   --messaging        RabbitMQ pub/sub through Dapr (implies --dapr)
+#   --cqrs             CQRS rules in AGENTS.md
+#   --event-sourcing   event-sourcing rules in AGENTS.md (implies --cqrs)
+#   --all              all modules
+#   --skip-dotnet, --skip-web  partial run for debugging; the result will not pass CI
 #
+# Without module flags you get the API, the web app and Postgres.
 # Needs: bash 3.2+, git, perl, .NET SDK matching global.json, Node.js 20+ with npm.
 
 set -euo pipefail
@@ -17,15 +23,57 @@ die()  { printf '\nerror: %s\n' "$*" >&2; exit 1; }
 step() { printf '\n==> %s\n' "$*"; }
 
 usage() {
-  sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+  awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
   exit 2
+}
+
+# Keeps or removes the parts of files marked for a module.
+#   Block:  a line holding only a comment with ">>> name", up to one with "<<< name"
+#           (# for YAML and env files, // for C#, <!-- --> for Markdown).
+#   Inline: <!-- >>> name -->text<!-- <<< name --> within one Markdown line.
+# Kept: only the markers go. Removed: markers and everything between them.
+apply_module() { # name keep(true|false) files...
+  local name=$1 keep=$2
+  shift 2
+  [ $# -gt 0 ] || return 0
+  MODULE=$name KEEP=$keep perl -0777 -pi -e '
+    my $n = quotemeta $ENV{MODULE};
+    my $c = qr{(?:\#|//|<!--)};
+    if ($ENV{KEEP} eq "true") {
+      s/^[ \t]*$c[ \t]*(?:>>>|<<<) $n\b[^\n]*\n//gm;
+      s/<!-- (?:>>>|<<<) $n -->//g;
+    } else {
+      s/<!-- >>> $n -->[^\n]*?<!-- <<< $n -->//g;
+      s/^[ \t]*$c[ \t]*>>> $n\b[^\n]*\n.*?^[ \t]*$c[ \t]*<<< $n\b[^\n]*\n//gms;
+    }
+  ' "$@"
+}
+
+# Files outside scripts/ that still contain module markers. README.md is skipped:
+# the template's README documents the markers, and init.sh replaces it.
+marked_files() {
+  grep -rlE '(>>>|<<<) [a-z]' . \
+    --exclude-dir=.git --exclude-dir=scripts --exclude-dir=node_modules \
+    --exclude-dir=bin --exclude-dir=obj --exclude=README.md || true
 }
 
 skip_dotnet=false
 skip_web=false
+# Module flags are read by name below (${!module}), which shellcheck cannot follow.
+# shellcheck disable=SC2034
+dapr=false
+messaging=false
+cqrs=false
+event_sourcing=false
 name=""
+# shellcheck disable=SC2034
 while [ $# -gt 0 ]; do
   case $1 in
+    --dapr) dapr=true ;;
+    --messaging) messaging=true; dapr=true ;;
+    --cqrs) cqrs=true ;;
+    --event-sourcing) event_sourcing=true; cqrs=true ;;
+    --all) dapr=true; messaging=true; cqrs=true; event_sourcing=true ;;
     --skip-dotnet) skip_dotnet=true ;;
     --skip-web) skip_web=true ;;
     -h|--help) usage ;;
@@ -67,7 +115,30 @@ if ! $skip_web; then
   node_major=$(node -p 'process.versions.node.split(".")[0]')
   [ "$node_major" -ge 20 ] || die "Node.js 20+ is required, found $(node --version)"
 fi
+
+modules=""
+for module in dapr messaging cqrs event_sourcing; do
+  if [ "${!module}" = true ]; then modules="$modules ${module//_/-}"; fi
+done
 echo "Project: $name   images: $kebab-api, $kebab-web"
+echo "Modules:${modules:- none (API, web app and Postgres)}"
+
+# ---------------------------------------------------------------- modules
+step "Applying modules"
+# Nested blocks are removed with their parent, so order does not matter.
+files=()
+while IFS= read -r file; do files+=("$file"); done < <(marked_files)
+for module in messaging event_sourcing cqrs dapr; do
+  apply_module "${module//_/-}" "${!module}" ${files[@]+"${files[@]}"}
+done
+leftover=$(marked_files)
+[ -z "$leftover" ] || die "unknown module markers left in: $leftover"
+
+if ! $dapr; then
+  rm -rf components
+elif ! $messaging; then
+  rm -f components/*/pubsub.yaml
+fi
 
 # ---------------------------------------------------------------- .NET
 if ! $skip_dotnet; then
@@ -95,40 +166,26 @@ if ! $skip_dotnet; then
   dotnet add "tests/$name.Application.Tests" reference "src/$name.Application"
   dotnet add "tests/$name.Api.IntegrationTests" reference "src/$name.Api"
 
-  step "Adding packages (latest stable versions)"
-  dotnet add "src/$name.Infrastructure" package Dapr.Client
-  dotnet add "src/$name.Api" package Dapr.AspNetCore
-  dotnet add "src/$name.Api" package Microsoft.Extensions.ApiDescription.Server
-  dotnet add "tests/$name.Api.IntegrationTests" package Microsoft.AspNetCore.Mvc.Testing
+  step "Adding packages"
+  # ASP.NET Core packages are versioned with the framework. Pin them to the version the
+  # webapi template chose for Microsoft.AspNetCore.OpenApi, which matches the SDK in
+  # global.json; unpinned, NuGet hands out the newest major, which may not support it.
+  aspnet_version=$(sed -n 's/.*Include="Microsoft\.AspNetCore\.OpenApi" Version="\([^"]*\)".*/\1/p' \
+    "src/$name.Api/$name.Api.csproj")
+  [ -n "$aspnet_version" ] || die "could not read the Microsoft.AspNetCore.OpenApi version from src/$name.Api/$name.Api.csproj"
+  echo "ASP.NET Core packages: $aspnet_version"
+  dotnet add "src/$name.Api" package Microsoft.Extensions.ApiDescription.Server --version "$aspnet_version"
+  dotnet add "tests/$name.Api.IntegrationTests" package Microsoft.AspNetCore.Mvc.Testing --version "$aspnet_version"
+  # Latest stable; these target several .NET versions
+  if $dapr; then
+    dotnet add "src/$name.Infrastructure" package Dapr.Client
+    dotnet add "src/$name.Api" package Dapr.AspNetCore
+  fi
 
   # Replace the weather-forecast sample with a clean starting point:
-  # Problem Details, OpenAPI, health checks and the Dapr client.
-  cat > "src/$name.Api/Program.cs" <<'CSHARP'
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-
-var builder = WebApplication.CreateBuilder(args);
-
-builder.Services.AddOpenApi();
-builder.Services.AddProblemDetails();
-builder.Services.AddHealthChecks();
-builder.Services.AddDaprClient();
-
-var app = builder.Build();
-
-app.UseExceptionHandler();
-app.UseStatusCodePages();
-
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
-
-// Liveness: the process is up. Readiness: every registered health check passes.
-app.MapHealthChecks("/healthz", new HealthCheckOptions { Predicate = _ => false });
-app.MapHealthChecks("/readyz");
-
-app.Run();
-CSHARP
+  # Problem Details, OpenAPI, health checks (and the Dapr client).
+  cp "$templates/Program.cs" "src/$name.Api/Program.cs"
+  apply_module dapr "$dapr" "src/$name.Api/Program.cs"
 
   cp "$templates/api.Dockerfile" "src/$name.Api/Dockerfile"
 
@@ -187,12 +244,14 @@ perl -pi -e "s/MyService/$name/g; s/my-service/$kebab/g" $targets
 cat > README.md <<EOF
 # $name
 
-Created from [wesback/nettemplate](https://github.com/wesback/nettemplate).
+Created from [wesback/nettemplate](https://github.com/wesback/nettemplate) with modules:${modules:- none}.
 Conventions, commands and the definition of done are in [AGENTS.md](AGENTS.md).
 
 \`\`\`bash
 docker compose up --build   # web on :3000, api on :8080
 \`\`\`
+
+Deployment to a Docker host: see the template's README, "Deploying to a Docker host".
 EOF
 
 # ---------------------------------------------------------------- verify
@@ -217,7 +276,7 @@ fi
 # ---------------------------------------------------------------- cleanup
 step "Removing the template scaffolding"
 rm -rf "$templates"
-rm -f scripts/init.sh
+rm -f scripts/init.sh .github/workflows/template-ci.yml
 rmdir scripts 2>/dev/null || true
 
 cat <<EOF
@@ -225,7 +284,7 @@ cat <<EOF
 Done. Next steps:
   1. Review and commit:   git add -A && git commit -m "chore: initialize $name from template"
   2. In the GitHub repo:  add the DOCKERHUB_USERNAME variable and DOCKERHUB_TOKEN secret
-  3. Protect main:        require pull requests and the ci, codeql and docker checks
+  3. Protect main:        require pull requests and the ci and docker checks
   4. Run it locally:      docker compose up --build
-  5. Before deploying:    prepare the host, see "Deploying to a Docker host" in README.md
+  5. Before deploying:    prepare the host, see "Deploying to a Docker host" in the template README
 EOF
