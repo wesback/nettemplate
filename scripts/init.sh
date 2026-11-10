@@ -49,11 +49,12 @@ apply_module() { # name keep(true|false) files...
   ' "$@"
 }
 
-# Files outside scripts/ that still contain module markers.
+# Files outside scripts/ that still contain module markers. README.md is skipped:
+# the template's README documents the markers, and init.sh replaces it.
 marked_files() {
   grep -rlE '(>>>|<<<) [a-z]' . \
     --exclude-dir=.git --exclude-dir=scripts --exclude-dir=node_modules \
-    --exclude-dir=bin --exclude-dir=obj || true
+    --exclude-dir=bin --exclude-dir=obj --exclude=README.md || true
 }
 
 skip_dotnet=false
