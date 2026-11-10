@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    # The template repo itself has no projects until scripts/init.sh runs.
+    if: github.repository != 'wesback/nettemplate'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - run: dotnet restore
+      - run: dotnet format --verify-no-changes --no-restore
+      - run: dotnet build --no-restore --configuration Release
+      - name: Fail on OpenAPI drift
+        run: |
+          if [ -n "$(git status --porcelain -- 'src/*.Api/*.json')" ]; then
+            git status --porcelain -- 'src/*.Api/*.json'
+            echo "::error::The generated OpenAPI spec differs from the committed one. Build locally and commit it."
+            exit 1
+          fi
+      - run: dotnet test --no-build --configuration Release
+
+  frontend:
+    if: github.repository != 'wesback/nettemplate'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test

@@ -1,0 +1,36 @@
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 3 * * 1'
+
+jobs:
+  analyze:
+    # The template repo itself has no projects until scripts/init.sh runs.
+    if: github.repository != 'wesback/nettemplate'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [csharp, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        if: matrix.language == 'csharp'
+        with:
+          global-json-file: global.json
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.language == 'csharp' && 'autobuild' || 'none' }}
+      - uses: github/codeql-action/autobuild@v4
+        if: matrix.language == 'csharp'
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

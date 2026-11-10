@@ -1,0 +1,14 @@
+# Local development only: Redis Streams pub/sub. Production components live
+# alongside the deployment and may use a different broker; code must not change.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: pubsub
+spec:
+  type: pubsub.redis
+  version: v1
+  metadata:
+    - name: redisHost
+      value: redis:6379
+    - name: redisPassword
+      value: ""
