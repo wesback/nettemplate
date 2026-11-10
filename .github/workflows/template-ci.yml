@@ -41,6 +41,15 @@ jobs:
         with:
           node-version: 24
 
+      # A pristine copy of the template, used as the sync source in the last step
+      - name: Keep a copy of the template
+        run: |
+          git config --global user.email template-ci@example.invalid
+          git config --global user.name template-ci
+          cp -a "$GITHUB_WORKSPACE" "$RUNNER_TEMP/template"
+          echo "TEMPLATE_REPOSITORY=$RUNNER_TEMP/template" >> "$GITHUB_ENV"
+          echo "TEMPLATE_COMMIT=$(git -C "$RUNNER_TEMP/template" rev-parse HEAD)" >> "$GITHUB_ENV"
+
       - name: Run init.sh
         env:
           FLAGS: ${{ matrix.flags }}
@@ -50,9 +59,12 @@ jobs:
 
       - name: No module markers left
         run: |
-          if grep -rIlE '(>>>|<<<) [a-z]' . \
-               --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.next \
-               --exclude-dir=bin --exclude-dir=obj; then
+          # Same scan as init.sh; scripts/ is skipped because the module library stays in
+          # projects and documents the marker syntax in its comments.
+          . scripts/lib/modules.sh
+          leftover=$(marked_files)
+          if [ -n "$leftover" ]; then
+            echo "$leftover"
             echo "::error::module markers left in the files above"
             exit 1
           fi
@@ -79,6 +91,35 @@ jobs:
           curl -fsS http://localhost:8080/healthz && echo
           curl -fsS http://localhost:8080/readyz && echo
           curl -fsS -o /dev/null -w 'web: %{http_code}\n' http://localhost:3000
+
+      - name: Template sync
+        run: |
+          template=$RUNNER_TEMP/template
+          git add -A && git commit -qm "project as init.sh left it"
+          echo "- Project rule added by template-ci." >> AGENTS.md
+          git commit -qam "project rule"
+
+          # Change the template: an owned file (AGENTS.md) and a seeded one (docker-compose.yml)
+          perl -pi -e 's/^(- Make the smallest change that solves the task\..*)$/$1\n- Template rule added by template-ci./' "$template/AGENTS.md"
+          echo "# changed by template-ci" >> "$template/docker-compose.yml"
+          git -C "$template" commit -qam "template change"
+
+          bash scripts/sync-template.sh HEAD
+          fail() { echo "::error::$*"; exit 1; }
+          grep -q "Template rule added by template-ci" AGENTS.md || fail "template change did not arrive"
+          grep -q "Project rule added by template-ci" AGENTS.md || fail "project rule was lost"
+          if grep -qE '(>>>|<<<) [a-z]' AGENTS.md; then fail "module markers in AGENTS.md"; fi
+          if grep -q "changed by template-ci" docker-compose.yml; then fail "seeded file was changed"; fi
+          grep -q "changed by template-ci" "$(git rev-parse --absolute-git-dir)/template-upstream.patch" \
+            || fail "seeded change missing from the patch"
+          git diff --stat
+
+          git add -A && git commit -qm "sync"
+          bash scripts/sync-template.sh HEAD
+          [ -z "$(git status --porcelain)" ] || { git status --short; fail "a second sync changed files"; }
+
+          # The synced project still builds
+          dotnet build --configuration Release
 
       - name: Logs on failure
         if: failure()

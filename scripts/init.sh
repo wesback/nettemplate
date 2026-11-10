@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck source-path=SCRIPTDIR
 # Turns a fresh copy of the template into a working project:
 #   - .NET solution: Domain, Application, Infrastructure, Api + test projects
 #   - Next.js app in web/ with strict TypeScript, Vitest and a standalone build
@@ -23,38 +24,8 @@ die()  { printf '\nerror: %s\n' "$*" >&2; exit 1; }
 step() { printf '\n==> %s\n' "$*"; }
 
 usage() {
-  awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
+  awk 'NR > 1 && /^# shellcheck/ { next } NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
   exit 2
-}
-
-# Keeps or removes the parts of files marked for a module.
-#   Block:  a line holding only a comment with ">>> name", up to one with "<<< name"
-#           (# for YAML and env files, // for C#, <!-- --> for Markdown).
-#   Inline: <!-- >>> name -->text<!-- <<< name --> within one Markdown line.
-# Kept: only the markers go. Removed: markers and everything between them.
-apply_module() { # name keep(true|false) files...
-  local name=$1 keep=$2
-  shift 2
-  [ $# -gt 0 ] || return 0
-  MODULE=$name KEEP=$keep perl -0777 -pi -e '
-    my $n = quotemeta $ENV{MODULE};
-    my $c = qr{(?:\#|//|<!--)};
-    if ($ENV{KEEP} eq "true") {
-      s/^[ \t]*$c[ \t]*(?:>>>|<<<) $n\b[^\n]*\n//gm;
-      s/<!-- (?:>>>|<<<) $n -->//g;
-    } else {
-      s/<!-- >>> $n -->[^\n]*?<!-- <<< $n -->//g;
-      s/^[ \t]*$c[ \t]*>>> $n\b[^\n]*\n.*?^[ \t]*$c[ \t]*<<< $n\b[^\n]*\n//gms;
-    }
-  ' "$@"
-}
-
-# Files outside scripts/ that still contain module markers. README.md is skipped:
-# the template's README documents the markers, and init.sh replaces it.
-marked_files() {
-  grep -rlE '(>>>|<<<) [a-z]' . \
-    --exclude-dir=.git --exclude-dir=scripts --exclude-dir=node_modules \
-    --exclude-dir=bin --exclude-dir=obj --exclude=README.md || true
 }
 
 skip_dotnet=false
@@ -93,6 +64,8 @@ kebab=$(printf '%s' "$name" | sed -e 's/\./-/g' -e 's/\([a-z0-9]\)\([A-Z]\)/\1-\
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
 templates=scripts/templates
+# shellcheck source=lib/modules.sh
+. scripts/lib/modules.sh
 
 # ---------------------------------------------------------------- preflight
 step "Checking prerequisites"
@@ -120,17 +93,15 @@ modules=""
 for module in dapr messaging cqrs event_sourcing; do
   if [ "${!module}" = true ]; then modules="$modules ${module//_/-}"; fi
 done
-echo "Project: $name   images: $kebab-api, $kebab-web"
-echo "Modules:${modules:- none (API, web app and Postgres)}"
+modules=${modules# }
+echo "Project: $name"
+echo "Modules: ${modules:-none (API, web app and Postgres)}"
 
 # ---------------------------------------------------------------- modules
 step "Applying modules"
-# Nested blocks are removed with their parent, so order does not matter.
 files=()
 while IFS= read -r file; do files+=("$file"); done < <(marked_files)
-for module in messaging event_sourcing cqrs dapr; do
-  apply_module "${module//_/-}" "${!module}" ${files[@]+"${files[@]}"}
-done
+if [ ${#files[@]} -gt 0 ]; then apply_modules "$modules" "${files[@]}"; fi
 leftover=$(marked_files)
 [ -z "$leftover" ] || die "unknown module markers left in: $leftover"
 
@@ -185,7 +156,7 @@ if ! $skip_dotnet; then
   # Replace the weather-forecast sample with a clean starting point:
   # Problem Details, OpenAPI, health checks (and the Dapr client).
   cp "$templates/Program.cs" "src/$name.Api/Program.cs"
-  apply_module dapr "$dapr" "src/$name.Api/Program.cs"
+  apply_modules "$modules" "src/$name.Api/Program.cs"
 
   cp "$templates/api.Dockerfile" "src/$name.Api/Dockerfile"
 
@@ -233,7 +204,7 @@ fi
 
 # ---------------------------------------------------------------- names
 step "Replacing template names"
-targets=".github/workflows/docker.yml docker-compose.yml deploy/compose.yml deploy/compose.host.example.yml"
+targets="docker-compose.yml deploy/images.json deploy/compose.host.example.yml"
 [ -f "src/$name.Api/Dockerfile" ] && targets="$targets src/$name.Api/Dockerfile"
 for file in $targets; do
   [ -f "$file" ] || die "template file missing: $file"
@@ -244,7 +215,8 @@ perl -pi -e "s/MyService/$name/g; s/my-service/$kebab/g" $targets
 cat > README.md <<EOF
 # $name
 
-Created from [wesback/nettemplate](https://github.com/wesback/nettemplate) with modules:${modules:- none}.
+Created from [wesback/nettemplate](https://github.com/wesback/nettemplate) with modules: ${modules:-none}.
+Update from the template with \`scripts/sync-template.sh\`.
 Conventions, commands and the definition of done are in [AGENTS.md](AGENTS.md).
 
 \`\`\`bash
@@ -274,10 +246,21 @@ if ! $skip_web; then
 fi
 
 # ---------------------------------------------------------------- cleanup
+step "Recording the template version"
+# TEMPLATE_REPOSITORY and TEMPLATE_COMMIT are for template-ci; normally the commit is
+# whatever main of the template points at now, which is what the project was created from.
+template_repository=${TEMPLATE_REPOSITORY:-wesback/nettemplate}
+template_commit=${TEMPLATE_COMMIT:-}
+if [ -z "$template_commit" ]; then
+  template_commit=$(git ls-remote "https://github.com/$template_repository.git" refs/heads/main 2>/dev/null | cut -f1) || true
+fi
+[ -n "$template_commit" ] || echo "warning: could not read the template's commit; the first sync will not list changes to project-owned files"
+write_template_lock .template.json "$template_repository" main "$template_commit" "$modules"
+cat .template.json
+
 step "Removing the template scaffolding"
 rm -rf "$templates"
 rm -f scripts/init.sh .github/workflows/template-ci.yml
-rmdir scripts 2>/dev/null || true
 
 cat <<EOF
 

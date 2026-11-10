@@ -25,7 +25,7 @@ The default is the smallest useful app: API, web app and Postgres. Add only what
 | `--event-sourcing` | Event-sourcing rules in AGENTS.md (implies `--cqrs`) |
 | `--all` | Everything above |
 
-Adding a module later by hand means copying its marked parts (`>>> name` to `<<< name`) from this template.
+To add a module later, add it to `modules` in `.template.json` and run `scripts/sync-template.sh`: AGENTS.md and the other template-owned files pick it up. Compose files and components are project-owned, so copy their marked parts from this template by hand.
 
 ### Then, in the new repository on GitHub
 
@@ -39,6 +39,8 @@ Adding a module later by hand means copying its marked parts (`>>> name` to `<<<
 ```
 .
 ├── AGENTS.md                    # rules for coding agents, trimmed to your modules
+├── .template.json               # template commit and modules, used by sync-template.sh
+├── template-files.txt           # which files the template owns
 ├── .editorconfig                # style, enforced at build
 ├── Directory.Build.props        # nullable, warnings as errors, analyzers, OpenAPI on build
 ├── global.json                  # pinned .NET SDK
@@ -47,6 +49,7 @@ Adding a module later by hand means copying its marked parts (`>>> name` to `<<<
 ├── components/                  # Dapr components, local and prod (with --dapr)
 ├── deploy/
 │   ├── compose.yml              # production stack, self-contained, no proxy config
+│   ├── images.json              # the images docker.yml builds
 │   ├── .env.example             # secrets the host's .env must define
 │   └── compose.host.example.yml # example Traefik overlay; the real one lives on the host
 ├── src/
@@ -59,10 +62,29 @@ Adding a module later by hand means copying its marked parts (`>>> name` to `<<<
 │   ├── <Name>.Application.Tests/
 │   └── <Name>.Api.IntegrationTests/
 ├── web/                         # Next.js App Router, strict TS, Vitest, standalone Dockerfile
+├── scripts/                     # sync-template.sh and its module library
 └── .github/
     ├── dependabot.yml
     └── workflows/               # ci, codeql, docker (build, Trivy scan, push), deploy
 ```
+
+## Updating a project from the template
+
+GitHub template copies have no link back to the template, so updates go through a script:
+
+```bash
+git switch main && git pull
+bash scripts/sync-template.sh              # or a tag or commit of the template
+git diff                                   # review, run the checks, then:
+git switch -c chore/template-sync && git commit -am "chore: sync template" && git push
+```
+
+Files fall into two groups, listed in `template-files.txt`:
+
+- **Template-owned** (AGENTS.md, `.editorconfig`, `Directory.Build.props`, `global.json`, Dependabot and the workflows, the sync script itself): replaced on every sync, with the project's modules applied. Projects do not edit them; changes go into the template. AGENTS.md keeps everything below its `Project-specific rules` line.
+- **Seeded** (compose files, Dapr components, `deploy/`, `.gitignore`, the starter Dockerfiles): copied once, then owned by the project. A sync never touches them; it writes what the template changed in them to `.git/template-upstream.patch` for you to carry over by hand.
+
+The template commit and modules are recorded in `.template.json`. For a project created before that file existed, run the first sync with `--modules "<the modules init.sh used>"`.
 
 ## Deploying to a Docker host
 
@@ -108,6 +130,8 @@ Create `/var/backups/<repo>` first, and copy it off the host (NFS, object storag
 
 - `template-ci` runs `init.sh` with no modules and with `--all` on every pull request and weekly, then builds, tests and starts the result. The weekly run catches breaking changes in `create-next-app`, the `dotnet new` templates and base images.
 - The other workflows skip themselves in this repository (`github.repository != 'wesback/nettemplate'`) because it has no projects. Update that line if the template moves.
-- `MyService` and `my-service` in `docker.yml`, both compose files, `deploy/compose.host.example.yml` and `scripts/templates/api.Dockerfile` are placeholders that `init.sh` replaces.
+- `MyService` and `my-service` in `docker-compose.yml`, `deploy/images.json`, `deploy/compose.host.example.yml` and `scripts/templates/api.Dockerfile` are placeholders that `init.sh` replaces. Template-owned files must stay free of project names, so they can be synced; images are named after the repository.
+- Classify every new file in `template-files.txt`: owned if all projects should get changes to it automatically, seeded if projects will edit it.
+- `template-ci` also tests a sync: it changes the template, syncs the generated project and checks that the change arrives, the project's own AGENTS.md rules survive, seeded files stay untouched and a second sync changes nothing.
 - Module parts are marked with `>>> name` and `<<< name` comments; `template-ci` fails if any marker survives `init.sh`.
 - Dependabot keeps action, image and package versions current in every project created from the template; bump `global.json` and the image tags here when a new LTS ships.
