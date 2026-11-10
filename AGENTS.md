@@ -8,6 +8,8 @@ This file only describes what the project actually uses. A rule that starts with
 
 This repo starts from the team template. If any of these files are missing, stop and restore them from the template before writing feature code. Never weaken their settings to make a build pass.
 
+Files listed under `[owned]` in `template-files.txt` belong to the template: `scripts/sync-template.sh` overwrites them. Do not edit them in this project; put project-specific settings in project files (`.csproj`, a nested `.editorconfig`) and project rules at the end of this file.
+
 - `.editorconfig`: formatting and C# style rules.
 - `Directory.Build.props`: nullable reference types, warnings as errors, analyzers, build-time OpenAPI generation.
 - `global.json`: pinned .NET SDK version.
@@ -141,7 +143,7 @@ This repo starts from the team template. If any of these files are missing, stop
 <!-- <<< dapr -->
 - Deployments pin the commit SHA or semver image tag, never latest.
 
-The pipeline lives in `.github/workflows/`. Read it before changing anything about builds, tags or deployment. A new deployable image is one new entry in the `image` matrix of `docker.yml` and one new service in `deploy/compose.yml`.
+The pipeline lives in `.github/workflows/`. Read it before changing anything about builds, tags or deployment. A new deployable image is one new entry in `deploy/images.json` and one new service in `deploy/compose.yml`. Images are named `<repository>-<image name>`.
 
 ### Deployment
 
@@ -219,3 +221,9 @@ Keep this table accurate for this repo; agents run these instead of guessing. Fr
 - [ ] Docs and this file updated if a convention changed.
 - [ ] PR description states what, why, how it was tested, and assumptions.
 - [ ] Any conflicts between existing code and this file are reported.
+
+## Project-specific rules
+
+Rules for this project only. They take precedence over the rules above, except security rules. Everything above this section comes from the template and is replaced by `scripts/sync-template.sh`; everything below the next line belongs to the project and is kept.
+
+<!-- project-rules: keep below -->

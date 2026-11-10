@@ -1,0 +1,43 @@
+# Which template files projects keep in sync. Read by scripts/sync-template.sh.
+#
+# [owned]   The template owns these. A sync replaces them (with the project's modules
+#           applied), and deletes them when the template drops them. Projects do not
+#           edit them; change the template instead. AGENTS.md is the exception: the
+#           "Project-specific rules" section at its end belongs to the project and is kept.
+# [seeded]  Copied once by the template, then owned by the project. A sync never touches
+#           them; it writes the template's changes to them as a patch to review.
+
+[owned]
+AGENTS.md
+.editorconfig
+Directory.Build.props
+global.json
+template-files.txt
+.github/actionlint.yaml
+.github/dependabot.yml
+.github/workflows/ci.yml
+.github/workflows/codeql.yml
+.github/workflows/deploy.yml
+.github/workflows/docker.yml
+scripts/lib/modules.sh
+scripts/sync-template.sh
+
+[seeded]
+.dockerignore
+.gitignore
+docker-compose.yml
+components/local/pubsub.yaml
+components/local/statestore.yaml
+components/prod/pubsub.yaml
+components/prod/secretstore.yaml
+components/prod/statestore.yaml
+deploy/.env.example
+deploy/compose.host.example.yml
+deploy/compose.yml
+deploy/images.json
+scripts/templates/Program.cs
+scripts/templates/api.Dockerfile
+scripts/templates/web/Dockerfile
+scripts/templates/web/.dockerignore
+scripts/templates/web/next.config.ts
+scripts/templates/web/vitest.config.mts

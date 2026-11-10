@@ -1,0 +1,4 @@
+[
+  { "name": "api", "context": ".", "dockerfile": "src/MyService.Api/Dockerfile" },
+  { "name": "web", "context": "web", "dockerfile": "web/Dockerfile" }
+]

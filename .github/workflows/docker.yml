@@ -1,6 +1,7 @@
 name: docker
 
-# Builds, scans with Trivy and pushes every image in the matrix to Docker Hub.
+# Builds, scans with Trivy and pushes every image in deploy/images.json to Docker Hub
+# as <DOCKERHUB_USERNAME>/<repository name>-<image name>.
 # Pull requests build and scan only; main also pushes `latest`; v*.*.* tags push semver.
 # Needs the DOCKERHUB_USERNAME repository variable and the DOCKERHUB_TOKEN secret.
 
@@ -11,22 +12,31 @@ on:
   pull_request:
 
 jobs:
-  image:
+  images:
     # The template repo itself has no projects until scripts/init.sh runs.
     if: github.repository != 'wesback/nettemplate'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.read.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      # The images to build live in deploy/images.json, which the project owns, so this
+      # workflow stays the same in every project and can be synced from the template.
+      - id: read
+        run: echo "matrix=$(jq -c . deploy/images.json)" >> "$GITHUB_OUTPUT"
+
+  image:
+    needs: images
+    name: image (${{ matrix.name }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: my-service-api
-            context: .
-            dockerfile: src/MyService.Api/Dockerfile
-          - name: my-service-web
-            context: web
-            dockerfile: web/Dockerfile
+        include: ${{ fromJSON(needs.images.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
 
@@ -43,7 +53,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ vars.DOCKERHUB_USERNAME }}/${{ matrix.name }}
+          images: ${{ vars.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}-${{ matrix.name }}
           tags: |
             type=sha,format=long
             type=semver,pattern={{version}}
