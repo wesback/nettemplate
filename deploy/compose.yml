@@ -23,7 +23,7 @@ services:
         condition: service_healthy
 
   api-dapr:
-    image: daprio/daprd:1.17.3
+    image: daprio/daprd:1.18.10
     restart: unless-stopped
     command:
       - ./daprd
