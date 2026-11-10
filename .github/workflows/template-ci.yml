@@ -59,9 +59,12 @@ jobs:
 
       - name: No module markers left
         run: |
-          if grep -rIlE '(>>>|<<<) [a-z]' . \
-               --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.next \
-               --exclude-dir=bin --exclude-dir=obj; then
+          # Same scan as init.sh; scripts/ is skipped because the module library stays in
+          # projects and documents the marker syntax in its comments.
+          . scripts/lib/modules.sh
+          leftover=$(marked_files)
+          if [ -n "$leftover" ]; then
+            echo "$leftover"
             echo "::error::module markers left in the files above"
             exit 1
           fi
