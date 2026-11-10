@@ -1,0 +1,46 @@
+# Full local stack: docker compose up --build
+#   web  http://localhost:3000
+#   api  http://localhost:8080   (Dapr sidecar shares its network namespace, HTTP API on :3500)
+services:
+  api:
+    build:
+      context: .
+      dockerfile: src/MyService.Api/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      DAPR_HTTP_PORT: "3500"
+      DAPR_GRPC_PORT: "50001"
+    depends_on:
+      - redis
+
+  api-dapr:
+    image: daprio/daprd:1.17.3
+    command:
+      - ./daprd
+      - --app-id=my-service-api
+      - --app-port=8080
+      - --dapr-http-port=3500
+      - --dapr-grpc-port=50001
+      - --resources-path=/components
+    volumes:
+      - ./components/local:/components:ro
+    network_mode: "service:api"
+    depends_on:
+      - api
+
+  web:
+    build:
+      context: web
+    ports:
+      - "3000:3000"
+    environment:
+      API_BASE_URL: http://api:8080
+    depends_on:
+      - api
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"

@@ -1,0 +1,49 @@
+# .NET build output
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+TestResults/
+*.trx
+coverage*.xml
+*.coverage
+
+# IDEs
+.vs/
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.user
+*.suo
+*.rsuser
+*.DotSettings.user
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+
+# Secrets and local settings
+.env
+.env.*
+!.env.example
+appsettings.*.local.json
+*.pfx
+
+# Front end
+node_modules/
+web/.next/
+web/out/
+web/next-env.d.ts
+web/coverage/
+web/playwright-report/
+web/test-results/
+*.tsbuildinfo
+
+# Local Dapr and tooling
+.dapr/
+
+# OS
+.DS_Store
+Thumbs.db
