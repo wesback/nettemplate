@@ -13,7 +13,8 @@ This repo starts from the team template. If any of these files are missing, stop
 - `global.json`: pinned .NET SDK version.
 - `web/tsconfig.json`: TypeScript strict mode.
 - `.github/dependabot.yml`: dependency updates for NuGet, npm, Docker, Docker Compose and Actions.
-- `.github/workflows/`: CI, CodeQL, and the Docker build, scan and push pipeline.
+- `.github/workflows/`: CI, CodeQL, the Docker build, scan and push pipeline, and the deploy job.
+- `deploy/` and `components/prod/`: the production stack and its Dapr components.
 - `.dockerignore`, `web/.dockerignore` and `.gitignore`.
 
 ## Working principles
@@ -84,7 +85,7 @@ Remove this section if state is stored directly. It assumes the CQRS module.
 - Use Dapr state management for simple state where appropriate.
 - Use Dapr service invocation for synchronous service-to-service calls, with resiliency policies (timeouts, retries, circuit breakers) defined in Dapr config, not hand-coded.
 - Read secrets and configuration through the Dapr secrets and configuration APIs.
-- Component definitions live in `/components`. Local and production components may differ; code must not.
+- Component definitions live in `components/local/` (dev credentials) and `components/prod/` (credentials via the `envsecrets` secret store). Both sets use the same component names: `pubsub` (RabbitMQ) and `statestore` (Postgres). Local and production components may differ; code must not.
 - Subscribers must be idempotent and tolerate at-least-once delivery.
 
 ## Back end: .NET
@@ -123,7 +124,15 @@ Remove this section if state is stored directly. It assumes the CQRS module.
 - Dapr runs as a sidecar; images never bundle the Dapr runtime.
 - Deployments pin the commit SHA or semver image tag, never latest.
 
-The pipeline lives in `.github/workflows/`. Read it before changing anything about builds, tags or deployment. A new deployable image is one new entry in the `image` matrix of `docker.yml`.
+The pipeline lives in `.github/workflows/`. Read it before changing anything about builds, tags or deployment. A new deployable image is one new entry in the `image` matrix of `docker.yml` and one new service in `deploy/compose.yml`.
+
+### Deployment
+
+- The app is self-contained: `deploy/compose.yml` brings its own RabbitMQ and Postgres. Never depend on infrastructure shared with other apps on the host.
+- The app does not know the host's reverse proxy. Proxy labels, hostnames and external networks belong in `compose.host.yml` on the host, never in this repo.
+- `deploy.yml` deploys after a green `docker` run on `main`, using the `sha-<full commit sha>` image tag. Roll back by running it manually with an older tag.
+- Secrets live only in the host's `.env`; `deploy/.env.example` lists the names. Adding a secret means updating `.env.example` and telling the user to add it on the host before merging.
+- Schema and data changes must work with the previous image still running until the new one is healthy, so a rollback stays possible.
 
 ## Security
 
@@ -143,8 +152,8 @@ The pipeline lives in `.github/workflows/`. Read it before changing anything abo
 
 ## Local development
 
-- One command starts the full stack: `docker compose up --build`, with a Dapr sidecar per service.
-- Local Dapr components (Redis for pub/sub and state) live in `/components/local`.
+- One command starts the full stack: `docker compose up --build`, with a Dapr sidecar per service, RabbitMQ (management UI on port 15672) and Postgres.
+- Local runs on the same infrastructure as production, so behaviour around redelivery, ordering and transactions matches.
 - Seed data and a reset script exist so local data can be rebuilt from scratch.
 - The agent runs the stack and exercises its change before calling it done.
 

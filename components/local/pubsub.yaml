@@ -1,14 +1,22 @@
-# Local development only: Redis Streams pub/sub. Production components live
-# alongside the deployment and may use a different broker; code must not change.
+# Local development: the app's own RabbitMQ with dev credentials.
+# Production uses the same component name; see components/prod/pubsub.yaml.
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
   name: pubsub
 spec:
-  type: pubsub.redis
+  type: pubsub.rabbitmq
   version: v1
   metadata:
-    - name: redisHost
-      value: redis:6379
-    - name: redisPassword
-      value: ""
+    - name: connectionString
+      value: amqp://app:app@rabbitmq:5672
+    - name: durable
+      value: "true"
+    - name: deletedWhenUnused
+      value: "false"
+    - name: deliveryMode
+      value: "2"
+    - name: publisherConfirm
+      value: "true"
+    - name: enableDeadLetter
+      value: "true"

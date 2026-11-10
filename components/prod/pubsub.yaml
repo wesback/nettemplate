@@ -1,0 +1,25 @@
+# Production: the app's own RabbitMQ (deploy/compose.yml). Credentials come from envsecrets.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: pubsub
+spec:
+  type: pubsub.rabbitmq
+  version: v1
+  metadata:
+    - name: connectionString
+      secretKeyRef:
+        name: RABBITMQ_CONNECTION_STRING
+        key: RABBITMQ_CONNECTION_STRING
+    - name: durable
+      value: "true"
+    - name: deletedWhenUnused
+      value: "false"
+    - name: deliveryMode
+      value: "2"
+    - name: publisherConfirm
+      value: "true"
+    - name: enableDeadLetter
+      value: "true"
+auth:
+  secretStore: envsecrets

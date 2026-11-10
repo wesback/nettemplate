@@ -1,0 +1,20 @@
+# Example host overlay for a Traefik setup. It does NOT live in the app's deploy path:
+# copy it to /opt/apps/<repo>/compose.host.yml on the host and adapt it there.
+# Router names must be unique per host, the entrypoint and cert resolver names must
+# match your Traefik config, and the proxy network must already exist.
+services:
+  web:
+    networks:
+      - default
+      - proxy
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.routers.my-service.rule=Host(`my-service.example.com`)
+      - traefik.http.routers.my-service.entrypoints=websecure
+      - traefik.http.routers.my-service.tls.certresolver=letsencrypt
+      - traefik.http.services.my-service.loadbalancer.server.port=3000
+
+networks:
+  proxy:
+    external: true

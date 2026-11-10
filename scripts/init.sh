@@ -176,8 +176,11 @@ fi
 
 # ---------------------------------------------------------------- names
 step "Replacing template names"
-targets=".github/workflows/docker.yml docker-compose.yml"
+targets=".github/workflows/docker.yml docker-compose.yml deploy/compose.yml deploy/compose.host.example.yml"
 [ -f "src/$name.Api/Dockerfile" ] && targets="$targets src/$name.Api/Dockerfile"
+for file in $targets; do
+  [ -f "$file" ] || die "template file missing: $file"
+done
 # shellcheck disable=SC2086
 perl -pi -e "s/MyService/$name/g; s/my-service/$kebab/g" $targets
 
@@ -224,4 +227,5 @@ Done. Next steps:
   2. In the GitHub repo:  add the DOCKERHUB_USERNAME variable and DOCKERHUB_TOKEN secret
   3. Protect main:        require pull requests and the ci, codeql and docker checks
   4. Run it locally:      docker compose up --build
+  5. Before deploying:    prepare the host, see "Deploying to a Docker host" in README.md
 EOF

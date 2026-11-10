@@ -45,7 +45,7 @@ jobs:
         with:
           images: ${{ vars.DOCKERHUB_USERNAME }}/${{ matrix.name }}
           tags: |
-            type=sha
+            type=sha,format=long
             type=semver,pattern={{version}}
             type=ref,event=branch
             type=raw,value=latest,enable={{is_default_branch}}

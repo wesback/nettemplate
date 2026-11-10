@@ -1,0 +1,15 @@
+# Production: the app's own Postgres (deploy/compose.yml). Credentials come from envsecrets.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: statestore
+spec:
+  type: state.postgresql
+  version: v2
+  metadata:
+    - name: connectionString
+      secretKeyRef:
+        name: POSTGRES_CONNECTION_STRING
+        key: POSTGRES_CONNECTION_STRING
+auth:
+  secretStore: envsecrets
