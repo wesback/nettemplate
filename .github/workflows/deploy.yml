@@ -8,6 +8,9 @@ name: deploy
 #
 # Security: keep repositories that use this private. On a public repository, pull
 # requests from forks could run code on a self-hosted runner.
+#
+# The `production` environment needs GitHub Pro (or a team plan) on a private repo;
+# required reviewers on it need a public repo or GitHub Enterprise.
 
 on:
   workflow_run:
@@ -30,9 +33,14 @@ permissions:
 jobs:
   deploy:
     # The template repo itself has no images until scripts/init.sh runs.
+    # workflow_run's branch filter matches the branch name only, so a fork's `main`
+    # would match too. Deploy only runs that were pushes to this repository.
     if: >-
       github.repository != 'wesback/nettemplate' &&
-      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: [self-hosted, docker-host]
     environment: production
     env:
@@ -63,10 +71,12 @@ jobs:
 
       - name: Install compose file and Dapr components
         run: |
-          install -d -m 755 "$APP_DIR/components"
           install -m 644 deploy/compose.yml "$APP_DIR/compose.yml"
-          rm -f "$APP_DIR"/components/*.yaml
-          install -m 644 components/prod/*.yaml "$APP_DIR/components/"
+          rm -rf "$APP_DIR/components"
+          if [ -d components/prod ]; then
+            install -d -m 755 "$APP_DIR/components"
+            install -m 644 components/prod/*.yaml "$APP_DIR/components/"
+          fi
           printf 'APP_NAME=%s\nIMAGE_TAG=%s\n' "$APP_NAME" "$IMAGE_TAG" > "$APP_DIR/deploy.env"
 
       - name: Pull and start

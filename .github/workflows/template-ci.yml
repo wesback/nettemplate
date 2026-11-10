@@ -1,0 +1,85 @@
+name: template-ci
+
+# Proves the template still produces a project that builds, tests and starts, for the
+# smallest and the largest module selection. The weekly run catches upstream changes
+# (create-next-app, dotnet new templates, base images).
+# Runs only in the template repository; init.sh deletes this file from new projects.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  init:
+    if: github.repository == 'wesback/nettemplate'
+    name: init (${{ matrix.modules }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - modules: minimal
+            flags: ''
+          - modules: all
+            flags: --all
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Run init.sh
+        env:
+          FLAGS: ${{ matrix.flags }}
+        run: |
+          # shellcheck disable=SC2086
+          bash scripts/init.sh $FLAGS Template.Check
+
+      - name: No module markers left
+        run: |
+          if grep -rIlE '(>>>|<<<) [a-z]' . \
+               --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.next \
+               --exclude-dir=bin --exclude-dir=obj; then
+            echo "::error::module markers left in the files above"
+            exit 1
+          fi
+
+      - name: Production stack renders
+        run: |
+          cat > "$RUNNER_TEMP/test.env" <<'EOF'
+          DOCKERHUB_USERNAME=ci
+          POSTGRES_USER=app
+          POSTGRES_PASSWORD=ci
+          POSTGRES_DB=app
+          RABBITMQ_USER=app
+          RABBITMQ_PASSWORD=ci
+          APP_NAME=template-check
+          IMAGE_TAG=sha-0000000000000000000000000000000000000000
+          EOF
+          docker compose --env-file "$RUNNER_TEMP/test.env" -f deploy/compose.yml config -q
+
+      - name: Start the local stack
+        run: docker compose up -d --build --wait --wait-timeout 300
+
+      - name: Smoke test
+        run: |
+          curl -fsS http://localhost:8080/healthz && echo
+          curl -fsS http://localhost:8080/readyz && echo
+          curl -fsS -o /dev/null -w 'web: %{http_code}\n' http://localhost:3000
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail 200 || true
