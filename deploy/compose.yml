@@ -38,7 +38,7 @@ services:
 
   # >>> dapr
   api-dapr:
-    image: daprio/daprd:1.18.10
+    image: daprio/daprd:1.18.11
     restart: unless-stopped
     command:
       - ./daprd
